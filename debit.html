@@ -1,0 +1,193 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Debit Request</title>
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+  <script src="firebase-config.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      background: linear-gradient(135deg, #fbc2eb, #a6c1ee);
+      color: #333;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    .container {
+      max-width: 600px;
+      margin: auto;
+      background: #fff;
+      border-radius: 10px;
+      padding: 20px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    }
+    h2 {
+      text-align: center;
+    }
+    input, button {
+      width: 100%;
+      padding: 10px;
+      margin-top: 10px;
+      font-size: 1rem;
+    }
+    button {
+      background-color: #a76ef5;
+      border: none;
+      color: white;
+      cursor: pointer;
+      border-radius: 5px;
+    }
+    button:hover {
+      background-color: #7c3aed;
+    }
+    .logout-wrap {
+      width: 100%;
+      display: flex;
+      justify-content: center;
+      margin-top: 20px;
+    }
+    .logout-btn {
+      padding: 8px 20px;
+      background: #555;
+      color: white;
+      border: none;
+      border-radius: 20px;
+      cursor: pointer;
+    }
+    .logout-btn:hover {
+      background: #333;
+    }
+    .info-box {
+      background: #f1f1f1;
+      padding: 10px;
+      margin-top: 10px;
+      border-radius: 5px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container" id="login-section">
+    <h2>Executive Login</h2>
+    <input type="text" id="exec-id" placeholder="Executive ID" />
+    <input type="password" id="exec-pass" placeholder="Password" />
+    <button onclick="checkLogin()">Login</button>
+    <p id="login-msg" style="color:red;"></p>
+  </div>
+
+  <div class="container" id="otp-section" style="display:none;">
+    <h2>Please enter OTP to open</h2>
+    <input type="text" id="otp-input" placeholder="Enter 6-digit OTP" />
+    <button onclick="verifyOTP()">Verify OTP</button>
+    <p id="otp-msg" style="color:red;"></p>
+  </div>
+
+  <div class="container" id="main-section" style="display:none;">
+    <h2>Debit Request Panel</h2>
+    <input type="email" id="emailInput" placeholder="Enter user email" />
+    <button onclick="fetchUser()">Fetch User Info</button>
+    <div class="info-box" id="userInfo" style="display:none;"></div>
+    <input type="number" id="amountInput" placeholder="Enter amount to debit" />
+    <button onclick="submitRequest()">Submit Debit Request</button>
+    <div class="logout-wrap">
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </div>
+
+  <script>
+    const correctID = "Debit.arciz";
+    const correctPASS = "Arcis@123";
+    let generatedOTP = "";
+
+    function checkLogin() {
+      const id = document.getElementById('exec-id').value.trim();
+      const pass = document.getElementById('exec-pass').value.trim();
+      if (id === correctID && pass === correctPASS) {
+        document.getElementById('login-section').style.display = 'none';
+        document.getElementById('otp-section').style.display = 'block';
+        generateAndSendOTP();
+      } else {
+        document.getElementById('login-msg').innerText = "Invalid ID or Password";
+      }
+    }
+
+    function generateAndSendOTP() {
+      generatedOTP = Math.floor(100000 + Math.random() * 900000).toString();
+      fetch("https://arciz-otp-server.onrender.com/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ otp: generatedOTP })
+      }).then(res => {
+        if (res.ok) console.log("OTP sent to admin email.");
+        else console.error("Failed to send OTP.");
+      }).catch(err => console.error("Error sending OTP:", err));
+    }
+
+    function verifyOTP() {
+      const userOTP = document.getElementById('otp-input').value.trim();
+      if (userOTP === generatedOTP) {
+        document.getElementById('otp-section').style.display = 'none';
+        document.getElementById('main-section').style.display = 'block';
+      } else {
+        document.getElementById('otp-msg').innerText = "Invalid OTP";
+      }
+    }
+
+    function logout() {
+      location.reload();
+    }
+
+    function encodeEmail(email) {
+      if (email.includes(',') && !email.includes('.')) return email;
+      return email.replace(/\./g, ',');
+    }
+
+    function fetchUser() {
+      const email = document.getElementById('emailInput').value.trim();
+      if (!email) return alert("Please enter an email");
+      const encodedEmail = encodeEmail(email);
+      firebase.database().ref('users/' + encodedEmail).once('value').then(snapshot => {
+        if (snapshot.exists()) {
+          const data = snapshot.val();
+          const infoHTML = `
+            <strong>Name:</strong> ${data.name || 'N/A'}<br/>
+            <strong>Phone:</strong> ${data.phone || 'N/A'}<br/>
+            <strong>Balance:</strong> $${data.balance || 0}<br/>
+            <strong>Referral Code:</strong> ${data.referralCode || 'N/A'}<br/>
+            <strong>Referred By:</strong> ${data.referral || 'N/A'}<br/>
+            <strong>User ID:</strong> ${data.userId || 'N/A'}<br/>
+          `;
+          document.getElementById('userInfo').style.display = 'block';
+          document.getElementById('userInfo').innerHTML = infoHTML;
+        } else {
+          alert("User not found");
+          document.getElementById('userInfo').style.display = 'none';
+        }
+      });
+    }
+
+    function submitRequest() {
+      const email = document.getElementById('emailInput').value.trim();
+      const amount = document.getElementById('amountInput').value.trim();
+      if (!email || !amount) return alert("Fill in all fields");
+      const requestRef = firebase.database().ref('debitRequests').push();
+      requestRef.set({
+        email: email,
+        amount: Number(amount),
+        status: 'pending',
+        timestamp: Date.now()
+      }).then(() => {
+        alert("Debit request submitted for admin approval.");
+        document.getElementById('amountInput').value = '';
+      }).catch(err => {
+        alert("Error submitting request: " + err.message);
+      });
+    }
+  </script>
+</body>
+</html>

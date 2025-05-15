@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Admin Panel - Arciz (User Info)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    /* Full-page gradient background */
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      color: black;
+      margin: 0;
+      min-height: 100vh;
+      background: linear-gradient(45deg, skyblue, lightgreen);
+      background-repeat: no-repeat;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    /* Centered card style for login and panel sections */
+    #login-section, #panel-section {
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+      width: 90%;
+      padding: 20px;
+    }
+    /* Specific width constraints for each card */
+    #login-section {
+      max-width: 400px;
+      animation: fadeInDown 0.6s ease both;  /* fade-in from top on load */
+    }
+    #panel-section {
+      max-width: 700px;
+      display: none;  /* hidden by default until login */
+    }
+    /* Keyframe animations for fade+slide */
+    @keyframes fadeInDown {
+      from { opacity: 0; transform: translateY(-30px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(30px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    /* Trigger admin panel fade-in when shown */
+    #panel-section.fade-in {
+      animation: fadeInUp 0.6s ease both;
+    }
+    /* Fade in dynamic content blocks when they get populated */
+    #user-details:not(:empty),
+    #transaction-history:not(:empty) {
+      animation: fadeInUp 0.5s ease;
+    }
+    /* Form inputs and buttons styling */
+    input, button {
+      margin: 10px;
+      padding: 10px;
+      font-size: 16px;
+      width: 90%;
+      max-width: 300px;
+      border-radius: 5px;
+    }
+    button {
+      cursor: pointer;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    button:hover {
+      transform: scale(1.05);
+      box-shadow: 0 0 10px rgba(0,0,0,0.2);
+    }
+    button:active {
+      transform: scale(0.95);
+    }
+    /* Table styling for transaction history */
+    table {
+      width: 90%;
+      max-width: 600px;
+      margin: 20px auto;
+      border-collapse: collapse;
+    }
+    th, td {
+      border: 1px solid #ddd;
+      padding: 8px;
+      color: black;
+    }
+    th {
+      background: #f0f0f0;
+    }
+    /* Message text styles */
+    #msg {
+      color: green;
+      font-weight: bold;
+      margin-top: 15px;
+    }
+    #login-error {
+      color: red;
+      font-weight: bold;
+      margin-top: 15px;
+    }
+  </style>
+</head>
+<body>
+
+<div id="login-section">
+  <h2>Admin Login</h2>
+  <input type="text" id="admin-id" placeholder="Admin ID"><br/>
+  <input type="password" id="admin-password" placeholder="Password"><br/>
+  <button onclick="checkAdmin()">Login</button>
+  <p id="login-error"></p>  <!-- Error message (appears in red if login fails) -->
+</div>
+
+<div id="panel-section">
+  <h2>Arciz Admin Panel</h2>
+  <input id="email" type="text" placeholder="user@example.com"><br/>
+  <input id="amount" type="number" placeholder="Amount"><br/>
+  <button onclick="updateBalance('credit')">Credit</button>
+  <button onclick="updateBalance('debit')">Debit</button>
+  <button onclick="loadUserDetails()">Show User Info</button>
+  <p id="msg"></p>  <!-- Success message for credit/debit -->
+  <button onclick="deleteUser()">Delete User</button>
+  <p id="delete-msg" style="color:red; font-weight:bold;"></p>
+  <!-- Containers for dynamic content -->
+  <div id="user-details" style="margin-top: 30px;"></div>
+  <div id="transaction-history"></div>
+  <button onclick="exportAllUsers()">Export All Users</button>
+  <button onclick="exportSingleUser()">Export User by Email</button>
+  <button onclick="logout()">Logout</button>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script>
+  const ID = "Dishant888";
+  const PASS = "989653217412121989";
+
+  function checkAdmin() {
+    const id = document.getElementById('admin-id').value.trim();
+    const pw = document.getElementById('admin-password').value.trim();
+    if (id === ID && pw === PASS) {
+      // Hide login, show panel with animation
+      document.getElementById('login-section').style.display = 'none';
+      const panel = document.getElementById('panel-section');
+      panel.style.display = 'block';
+      panel.classList.add('fade-in');  // trigger fade-in animation
+    } else {
+      document.getElementById('login-error').innerText = "Invalid ID or Password";
+    }
+  }
+
+  function logout() {
+    window.location.href = "index.html";
+  }
+
+  // (The following functions interact with Firebase – unchanged logic)
+  function encodeEmail(email) {
+    return email.replaceAll('.', ',');
+  }
+  function logTransaction(userId, amount, type) {
+    const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 16);
+    firebase.database().ref('transactions/' + userId).push({ amount, type, date: timestamp });
+  }
+  function updateBalance(type) {
+    const email = document.getElementById('email').value.trim();
+    const amount = parseFloat(document.getElementById('amount').value);
+    if (!email || isNaN(amount)) {
+      return alert("Please enter valid details.");
+    }
+    const id = encodeEmail(email);
+    const userRef = firebase.database().ref('users/' + id);
+    userRef.once('value').then(snapshot => {
+      const data = snapshot.val();
+      let current = data?.balance || 0;
+      let updated = (type === 'credit') ? current + amount : current - amount;
+      userRef.update({ balance: updated });
+      logTransaction(id, amount, type);
+      document.getElementById('msg').innerText = `${type}ed $${amount}. New balance: $${updated}`;
+    });
+  }
+  function loadUserDetails() {
+    const email = document.getElementById('email').value.trim();
+    if (!email) return alert("Enter a valid user email.");
+    const id = encodeEmail(email);
+    const userRef = firebase.database().ref('users/' + id);
+    const transRef = firebase.database().ref('transactions/' + id);
+
+    userRef.once('value').then(snapshot => {
+      const data = snapshot.val();
+      if (!data) {
+        document.getElementById('user-details').innerText = "User not found.";
+        return;
+      }
+      // Display user details (including referral info)
+      firebase.database().ref('users').once('value').then(allSnap => {
+        const allUsers = allSnap.val();
+        let referralCount = 0;
+        if (allUsers && data.referralCode) {
+          referralCount = Object.values(allUsers).filter(u => u.referral === data.referralCode).length;
+        }
+        document.getElementById('user-details').innerHTML = `
+          <h3>User Details</h3>
+          <p><strong>Email:</strong> ${email}</p>
+          <p><strong>Name:</strong> ${data.name || 'N/A'}</p>
+          <p><strong>Phone:</strong> ${data.phone || 'N/A'}</p>
+          <p><strong>Balance:</strong> $${data.balance || 0}</p>
+          <p><strong>Referral Code:</strong> ${data.referralCode || 'N/A'}</p>
+          <p><strong>Referred By:</strong> ${data.referral || 'N/A'}</p>
+          <p><strong>Signup Date:</strong> ${ data.createdAt ? data.createdAt.replace('T', ' ').slice(0, 16) : 'N/A'}</p>
+          <p><strong>Referral Count:</strong> ${referralCount}</p>
+          <p><strong>User ID:</strong> ${data.userId || 'N/A'}</p>
+        `;
+      });
+    });
+
+    transRef.once('value').then(snapshot => {
+      const transactions = snapshot.val();
+      if (!transactions) {
+        document.getElementById('transaction-history').innerHTML = "<p>No transaction history found.</p>";
+        return;
+      }
+      // Build transaction tables
+      let creditHTML = "<h3>Credits</h3><table><tr><th>Amount</th><th>Date</th></tr>";
+      let debitHTML  = "<h3>Debits</h3><table><tr><th>Amount</th><th>Date</th></tr>";
+      Object.values(transactions).forEach(txn => {
+        const row = `<tr><td>$${txn.amount}</td><td>${txn.date}</td></tr>`;
+        if (txn.type === "credit") creditHTML += row;
+        if (txn.type === "debit")  debitHTML  += row;
+      });
+      creditHTML += "</table>";
+      debitHTML  += "</table>";
+      document.getElementById('transaction-history').innerHTML = creditHTML + debitHTML;
+    });
+  }
+  function deleteUser() {
+    const email = document.getElementById('email').value.trim();
+    if (!email) return alert("Enter a valid user email.");
+    const id = encodeEmail(email);
+    const userRef = firebase.database().ref('users/' + id);
+    const transRef = firebase.database().ref('transactions/' + id);
+
+    userRef.remove().then(() => {
+      transRef.remove().then(() => {
+        document.getElementById('delete-msg').innerText = "User deleted successfully.";
+        document.getElementById('user-details').innerHTML = "";
+        document.getElementById('transaction-history').innerHTML = "";
+      });
+    }).catch(error => {
+      document.getElementById('delete-msg').innerText = "Error deleting user: " + error.message;
+    });
+  }
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+  function exportAllUsers() {
+    firebase.database().ref("users").once("value").then(snapshot => {
+      const allUsers = snapshot.val();
+      if (!allUsers) {
+        alert("No user data found.");
+        return;
+      }
+      const data = [];
+      Object.values(allUsers).forEach(user => {
+        const referralCode = user.referralCode;
+        const referralCount = Object.values(allUsers)
+                                    .filter(u => u.referral === referralCode).length;
+        data.push({
+          Name: user.name || '',
+          Email: user.email || '',
+          Phone: user.phone || '',
+          ReferralCode: referralCode || '',
+          ReferredBy: user.referral || '',
+          SignupDate: (user.createdAt || '').replace('T', ' ').slice(0, 16),
+          Balance: user.balance || 0,
+          ReferralCount: referralCount,
+          UserID: user.userId || ''
+        });
+      });
+      downloadAsExcel(data, "all_users_referrals");
+    }).catch(error => {
+      console.error("Firebase fetch error:", error);
+    });
+  }
+  function downloadAsExcel(data, filename) {
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    worksheet['!autofilter'] = { ref: XLSX.utils.encode_range({
+      s: { r: 0, c: 0 },
+      e: { r: 0, c: Object.keys(data[0]).length - 1 }
+    })};
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Users");
+    XLSX.writeFile(workbook, filename + ".xlsx");
+  }
+</script>
+<script>
+  function exportSingleUser() {
+    const email = document.getElementById('email').value.trim();
+    if (!email) return alert("Please enter a valid user email.");
+    const id = encodeEmail(email);
+    const userRef = firebase.database().ref("users/" + id);
+    const transRef = firebase.database().ref("transactions/" + id);
+
+    Promise.all([
+      userRef.once("value"),
+      firebase.database().ref("users").once("value"),
+      transRef.once("value")
+    ]).then(([userSnap, allUsersSnap, transSnap]) => {
+      const user = userSnap.val();
+      const allUsers = allUsersSnap.val();
+      const transactions = transSnap.val();
+      if (!user) {
+        alert("User not found.");
+        return;
+      }
+      const referralCount = Object.values(allUsers)
+                                  .filter(u => u.referral === user.referralCode).length;
+      let totalCredit = 0, totalDebit = 0;
+      if (transactions) {
+        Object.values(transactions).forEach(txn => {
+          if (txn.type === "credit") totalCredit += txn.amount;
+          if (txn.type === "debit")  totalDebit  += txn.amount;
+        });
+      }
+      const data = [{
+        Name: user.name || '',
+        Email: user.email || '',
+        Phone: user.phone || '',
+        ReferralCode: user.referralCode || '',
+        ReferredBy: user.referral || '',
+        SignupDate: (user.createdAt || '').replace('T', ' ').slice(0, 16),
+        ReferralCount: referralCount,
+        UserID: user.userId || '',
+        TotalCredit: totalCredit,
+        TotalDebit: totalDebit,
+        Balance: user.balance || 0
+      }];
+      downloadAsExcel(data, "user_" + id.replace(/[,]/g, '_'));
+    }).catch(error => {
+      console.error("Export single user error:", error);
+      alert("Something went wrong while fetching user data.");
+    });
+  }
+</script>
+
+
+<div id="level-requests" style="margin-top: 40px;">
+  <h3>Pending Level Approvals</h3>
+  <table id="requestTable" style="margin: auto;">
+    <thead>
+      <tr>
+        <th>Email</th>
+        <th>Name</th>
+        <th>Current</th>
+        <th>Eligible</th>
+        <th>Referrals</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+<script>
+  const levelThresholds = [0,10,20,35,50,70,95,120,150,185,220,260,300,350,400];
+
+  function loadLevelRequests() {
+    firebase.database().ref("users").once("value").then(snapshot => {
+      const users = snapshot.val();
+      const table = document.querySelector("#requestTable tbody");
+      table.innerHTML = "";
+      for (let id in users) {
+        const user = users[id];
+        const code = user.referralCode || "";
+        const referrals = Object.values(users).filter(u => u.referral === code).length;
+        const current = user.currentLevel || 1;
+        const eligible = levelThresholds.findIndex(t => referrals < t);
+        const next = Math.max(current + 1, eligible);
+
+        if (referrals >= levelThresholds[current] && next > current) {
+          const row = document.createElement("tr");
+          row.innerHTML = \`
+            <td>\${user.email || id.replace(/,/g, '.')}</td>
+            <td>\${user.name || 'N/A'}</td>
+            <td>\${current}</td>
+            <td>\${next}</td>
+            <td>\${referrals}</td>
+            <td><button onclick="approveLevel('\${id}', \${next})">Approve</button></td>
+          \`;
+          table.appendChild(row);
+        }
+      }
+    });
+  }
+
+  function approveLevel(id, level) {
+    firebase.database().ref("users/" + id).update({ currentLevel: level }).then(() => {
+      alert("User promoted to Level " + level);
+      loadLevelRequests();
+    });
+  }
+
+  // Load on admin login success
+  setTimeout(loadLevelRequests, 2000);
+</script>
+
+
+<div id="credit-requests" style="margin-top: 40px;">
+  <h3>Pending Credit Requests</h3>
+  <table id="creditRequestTable" style="margin: auto;">
+    <thead>
+      <tr>
+        <th>Email</th>
+        <th>Amount</th>
+        <th>Requested At</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+<script>
+  function loadCreditRequests() {
+    firebase.database().ref("creditRequests").once("value").then(snapshot => {
+      const data = snapshot.val();
+      const table = document.querySelector("#creditRequestTable tbody");
+      table.innerHTML = "";
+      if (!data) return;
+
+      Object.entries(data).forEach(([key, req]) => {
+        if (req.status === "pending") {
+          const row = document.createElement("tr");
+          const date = new Date(req.timestamp).toLocaleString("en-IN");
+          row.innerHTML = `
+            <td>${req.email}</td>
+            <td>$${req.amount}</td>
+            <td>${date}</td>
+            <td>
+              <button onclick="approveCreditRequest('${key}', '${req.email}', ${req.amount})">Approve</button>
+              <button onclick="rejectCreditRequest('${key}')">Reject</button>
+            </td>
+          `;
+          table.appendChild(row);
+        }
+      });
+    });
+  }
+
+  function approveCreditRequest(reqId, email, amount) {
+    const id = encodeEmail(email);
+    const userRef = firebase.database().ref('users/' + id);
+    const txnRef = firebase.database().ref('transactions/' + id);
+
+    userRef.once('value').then(snapshot => {
+      const data = snapshot.val();
+      const balance = data?.balance || 0;
+      const newBalance = balance + amount;
+      userRef.update({ balance: newBalance });
+
+      const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 16);
+      txnRef.push({ amount, type: 'credit', date: timestamp, source: 'admin approval' });
+
+      firebase.database().ref("creditRequests/" + reqId).update({ status: "approved" }).then(() => {
+        alert("Credit approved and applied to user account.");
+        loadCreditRequests();
+      });
+    });
+  }
+
+  function rejectCreditRequest(reqId) {
+    firebase.database().ref("creditRequests/" + reqId).update({ status: "rejected" }).then(() => {
+      alert("Credit request rejected.");
+      loadCreditRequests();
+    });
+  }
+
+  setTimeout(loadCreditRequests, 2500);
+</script>
+
+
+<div id="debit-requests" style="margin-top: 40px;">
+  <h3>Pending Debit Requests</h3>
+  <table id="debitRequestTable" style="margin: auto;">
+    <thead>
+      <tr>
+        <th>Email</th>
+        <th>Amount</th>
+        <th>Requested At</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+<script>
+  function loadDebitRequests() {
+    firebase.database().ref("debitRequests").once("value").then(snapshot => {
+      const data = snapshot.val();
+      const table = document.querySelector("#debitRequestTable tbody");
+      table.innerHTML = "";
+      if (!data) return;
+
+      Object.entries(data).forEach(([key, req]) => {
+        if (req.status === "pending") {
+          const row = document.createElement("tr");
+          const date = new Date(req.timestamp).toLocaleString("en-IN");
+          row.innerHTML = `
+            <td>${req.email}</td>
+            <td>$${req.amount}</td>
+            <td>${date}</td>
+            <td>
+              <button onclick="approveDebitRequest('${key}', '${req.email}', ${req.amount})">Approve</button>
+              <button onclick="rejectDebitRequest('${key}')">Reject</button>
+            </td>
+          `;
+          table.appendChild(row);
+        }
+      });
+    });
+  }
+
+  function approveDebitRequest(reqId, email, amount) {
+    const id = encodeEmail(email);
+    const userRef = firebase.database().ref('users/' + id);
+    const txnRef = firebase.database().ref('transactions/' + id);
+
+    userRef.once('value').then(snapshot => {
+      const data = snapshot.val();
+      const balance = data?.balance || 0;
+      const newBalance = balance - amount;
+      userRef.update({ balance: newBalance });
+
+      const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 16);
+      txnRef.push({ amount, type: 'debit', date: timestamp, source: 'admin approval' });
+
+      firebase.database().ref("debitRequests/" + reqId).update({ status: "approved" }).then(() => {
+        alert("Debit approved and applied to user account.");
+        loadDebitRequests();
+      });
+    });
+  }
+
+  function rejectDebitRequest(reqId) {
+    firebase.database().ref("debitRequests/" + reqId).update({ status: "rejected" }).then(() => {
+      alert("Debit request rejected.");
+      loadDebitRequests();
+    });
+  }
+
+  setTimeout(loadDebitRequests, 2500);
+</script>
+
+<script>
+  let generatedOTP = "";
+
+  function generateAndSendOTP() {
+    generatedOTP = Math.floor(100000 + Math.random() * 900000).toString();
+    fetch("https://arciz-otp-server.onrender.com/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ otp: generatedOTP })
+    }).then(res => {
+      if (res.ok) console.log("OTP sent to admin email.");
+      else console.error("Failed to send OTP.");
+    }).catch(err => console.error("Error sending OTP:", err));
+  }
+
+  function checkAdmin() {
+    const id = document.getElementById('admin-id').value.trim();
+    const pw = document.getElementById('admin-password').value.trim();
+    if (id === "Dishant888" && pw === "989653217412121989") {
+      document.getElementById('login-section').innerHTML = `
+        <h2>OTP Verification</h2>
+        <input type="text" id="admin-otp" placeholder="Enter OTP">
+        <button onclick="verifyAdminOTP()">Verify OTP</button>
+        <p id="otp-error" style="color:red;"></p>
+      `;
+      generateAndSendOTP();
+    } else {
+      document.getElementById('login-error').innerText = "Invalid ID or Password";
+    }
+  }
+
+  function verifyAdminOTP() {
+    const input = document.getElementById("admin-otp").value.trim();
+    if (input === generatedOTP) {
+      const panel = document.getElementById('panel-section');
+      panel.style.display = 'block';
+      panel.classList.add('fade-in');
+    } else {
+      document.getElementById('otp-error').innerText = "Invalid OTP";
+    }
+  }
+</script>
+</body>
+</html>
+
+
